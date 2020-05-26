@@ -30,6 +30,7 @@ parser.add_argument('--nb_heads', type=int, default=8, help='Number of head atte
 parser.add_argument('--dropout', type=float, default=0.6, help='Dropout rate (1 - keep probability).')
 parser.add_argument('--alpha', type=float, default=0.2, help='Alpha for the leaky_relu.')
 parser.add_argument('--patience', type=int, default=100, help='Patience')
+parser.add_argument('--load', type=str, default=None, help='Load trained models')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -108,47 +109,51 @@ def compute_test():
     loss_test = F.nll_loss(output[idx_test], labels[idx_test])
     acc_test = accuracy(output[idx_test], labels[idx_test])
     print("Test set results:",
-          "loss= {:.4f}".format(loss_test.data[0]),
-          "accuracy= {:.4f}".format(acc_test.data[0]))
+          "loss= {:.4f}".format(loss_test.data.item()),
+          "accuracy= {:.4f}".format(acc_test.data.item()))
 
-# Train model
-t_total = time.time()
-loss_values = []
-bad_counter = 0
-best = args.epochs + 1
-best_epoch = 0
-for epoch in range(args.epochs):
-    loss_values.append(train(epoch))
+if args.load is not None:
+    model.load_state_dict(torch.load(args.load))
+    compute_test()
+else:
+    # Train model
+    t_total = time.time()
+    loss_values = []
+    bad_counter = 0
+    best = args.epochs + 1
+    best_epoch = 0
+    for epoch in range(args.epochs):
+        loss_values.append(train(epoch))
 
-    torch.save(model.state_dict(), '{}.pkl'.format(epoch))
-    if loss_values[-1] < best:
-        best = loss_values[-1]
-        best_epoch = epoch
-        bad_counter = 0
-    else:
-        bad_counter += 1
+        torch.save(model.state_dict(), '{}.pkl'.format(epoch))
+        if loss_values[-1] < best:
+            best = loss_values[-1]
+            best_epoch = epoch
+            bad_counter = 0
+        else:
+            bad_counter += 1
 
-    if bad_counter == args.patience:
-        break
+        if bad_counter == args.patience:
+            break
+
+        files = glob.glob('*.pkl')
+        for file in files:
+            epoch_nb = int(file.split('.')[0])
+            if epoch_nb < best_epoch:
+                os.remove(file)
 
     files = glob.glob('*.pkl')
     for file in files:
         epoch_nb = int(file.split('.')[0])
-        if epoch_nb < best_epoch:
+        if epoch_nb > best_epoch:
             os.remove(file)
 
-files = glob.glob('*.pkl')
-for file in files:
-    epoch_nb = int(file.split('.')[0])
-    if epoch_nb > best_epoch:
-        os.remove(file)
+    print("Optimization Finished!")
+    print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
 
-print("Optimization Finished!")
-print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
+    # Restore best model
+    print('Loading {}th epoch'.format(best_epoch))
+    model.load_state_dict(torch.load('{}.pkl'.format(best_epoch)))
 
-# Restore best model
-print('Loading {}th epoch'.format(best_epoch))
-model.load_state_dict(torch.load('{}.pkl'.format(best_epoch)))
-
-# Testing
-compute_test()
+    # Testing
+    compute_test()
